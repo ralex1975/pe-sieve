@@ -1,8 +1,6 @@
 #include "mempage_data.h"
 #include "module_data.h"
 
-#define PE_NOT_FOUND 0
-
 bool MemPageData::fillInfo()
 {
 	MEMORY_BASIC_INFORMATION page_info = { 0 };
@@ -22,6 +20,22 @@ bool MemPageData::fillInfo()
 	alloc_base = (ULONGLONG) page_info.AllocationBase;
 	region_start = (ULONGLONG) page_info.BaseAddress;
 	region_end = region_start + page_info.RegionSize;
+	is_info_filled = true;
+	return true;
+}
+
+bool MemPageData::hasMappedName()
+{
+	if (!isInfoFilled() && !fillInfo()) {
+		return false;
+	}
+	std::string mapped_filename = RemoteModuleData::getMappedName(this->processHandle, (HMODULE)this->alloc_base);
+	if (mapped_filename.length() == 0) {
+#ifdef _DEBUG
+		std::cerr << "Could not retrieve name" << std::endl;
+#endif
+		return false;
+	}
 	return true;
 }
 

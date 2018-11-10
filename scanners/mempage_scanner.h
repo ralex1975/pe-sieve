@@ -8,6 +8,8 @@
 #include "module_scan_report.h"
 #include "mempage_data.h"
 
+#include "../utils/util.h"
+
 class MemPageScanReport : public ModuleScanReport
 {
 public:
@@ -15,42 +17,54 @@ public:
 		: ModuleScanReport(processHandle, _module, _moduleSize, status)
 	{
 		 is_executable = false;
-		 is_manually_loaded = false;
+		 is_listed_module = false;
 		 protection = 0;
-		 is_shellcode = false; //PE file
+		 has_pe = false; //not a PE file
+		 has_shellcode = true;
+		 is_doppel = false;
 	}
 
-	const virtual bool toJSON(std::stringstream &outs)
+	const virtual bool toJSON(std::stringstream &outs,size_t level = JSON_LEVEL)
 	{
-		outs << "\"workingset_scan\" : ";
-		outs << "{\n";
-		fieldsToJSON(outs);
-		outs << "\n}";
+		OUT_PADDED(outs, level, "\"workingset_scan\" : {\n");
+		fieldsToJSON(outs, level + 1);
+		outs << "\n";
+		OUT_PADDED(outs, level, "}");
 		return true;
 	}
 
-	const virtual void fieldsToJSON(std::stringstream &outs)
+	const virtual void fieldsToJSON(std::stringstream &outs, size_t level = JSON_LEVEL)
 	{
-		ModuleScanReport::toJSON(outs);
+		ModuleScanReport::toJSON(outs, level);
 		outs << ",\n";
-		outs << "\"is_shellcode\" : ";
-		outs << std::dec << is_shellcode;
+		OUT_PADDED(outs, level, "\"has_pe\" : ");
+		outs << std::dec << has_pe;
+		outs << ",\n";
+		OUT_PADDED(outs, level, "\"has_shellcode\" : ");
+		outs << std::dec << has_shellcode;
 		if (!is_executable) {
 			outs << ",\n";
-			outs << "\"is_executable\" : ";
+			OUT_PADDED(outs, level, "\"is_executable\" : ");
 			outs << std::dec << is_executable;
 		}
+		if (is_doppel) {
+			outs << ",\n";
+			OUT_PADDED(outs, level, "\"is_doppel\" : ");
+			outs << std::dec << is_doppel;
+		}
 		outs << ",\n";
-		outs << "\"is_manually_loaded\" : ";
-		outs << std::dec << is_manually_loaded;
+		OUT_PADDED(outs, level, "\"is_listed_module\" : ");
+		outs << std::dec << is_listed_module;
 		outs << ",\n";
-		outs << "\"protection\" : ";
+		OUT_PADDED(outs, level, "\"protection\" : ");
 		outs << std::dec << protection;
 	}
 
 	bool is_executable;
-	bool is_manually_loaded;
-	bool is_shellcode;
+	bool is_listed_module;
+	bool has_pe;
+	bool has_shellcode;
+	bool is_doppel;
 	DWORD protection;
 };
 
@@ -67,8 +81,9 @@ public:
 	virtual MemPageScanReport* scanRemote();
 
 protected:
+	bool isExecutable(MemPageData &memPageData);
 	bool isCode(MemPageData &memPageData);
-	MemPageScanReport* scanShellcode(MemPageData &memPageData);
+	MemPageScanReport* scanExecutableArea(MemPageData &memPageData);
 
 	bool isDeepScan;
 	bool detectShellcode; // is shellcode detection enabled

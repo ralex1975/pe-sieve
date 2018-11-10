@@ -33,9 +33,7 @@ public:
 	~ProcessScanReport()
 	{
 		deleteModuleReports();
-		if (exportsMap) {
-			delete exportsMap;
-		}
+		delete exportsMap;
 	}
 
 	void appendReport(ModuleScanReport *report)
@@ -67,6 +65,7 @@ public:
 	}
 
 	t_report generateSummary() const;
+	DWORD getPid() { return pid; }
 
 	std::string mainImagePath;
 	std::vector<ModuleScanReport*> module_reports; //TODO: make it protected

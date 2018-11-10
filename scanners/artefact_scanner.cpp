@@ -101,45 +101,53 @@ IMAGE_SECTION_HEADER* get_first_section(BYTE *loadedData, size_t loadedSize, IMA
 	return hdr_ptr;
 }
 
-BYTE* ArtefactScanner::findSecByPatterns(MemPageData &memPage)
+BYTE* ArtefactScanner::findSecByPatterns(BYTE *search_ptr, const size_t max_search_size)
 {
 	if (!memPage.load()) {
 		return nullptr;
 	}
+	const DWORD charact = IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
 	//find sections table
 	char sec_name[] = ".text";
-	BYTE *hdr_ptr = find_pattern(memPage.getLoadedData(), memPage.getLoadedSize(), (BYTE*)sec_name, strlen(sec_name));
+	BYTE *hdr_ptr = find_pattern(search_ptr, max_search_size, (BYTE*)sec_name, strlen(sec_name));
 	if (hdr_ptr) {
-		return hdr_ptr;
+		// if the section was found by name, check if it has valid characteristics:
+		if (is_valid_section(search_ptr, max_search_size, hdr_ptr, charact)) {
+			return hdr_ptr;
+		}
+		hdr_ptr = nullptr;
 	}
 	// try another pattern
 	BYTE sec_ending[] = {
 		0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00,
-		0x20, 0x00, 0x00, 0x60
+		0x20, 0x00, 0x00, 0x60 // common characteristics
 	};
 	const size_t sec_ending_size = sizeof(sec_ending);
-	hdr_ptr = find_pattern(memPage.getLoadedData(), memPage.getLoadedSize(), sec_ending, sec_ending_size);
+	hdr_ptr = find_pattern(search_ptr, max_search_size, sec_ending, sec_ending_size);
 	if (!hdr_ptr) {
 		return nullptr;
 	}
 	size_t offset_to_bgn = sizeof(IMAGE_SECTION_HEADER) - sec_ending_size;
 	hdr_ptr -= offset_to_bgn;
-	if (!peconv::validate_ptr(memPage.getLoadedData(), memPage.getLoadedSize(), hdr_ptr, sizeof(IMAGE_SECTION_HEADER))) {
+	if (!peconv::validate_ptr(search_ptr, max_search_size, hdr_ptr, sizeof(IMAGE_SECTION_HEADER))) {
 		return nullptr;
 	}
-	return hdr_ptr;
+	if (is_valid_section(search_ptr, max_search_size, hdr_ptr, charact)) {
+		return hdr_ptr;
+	}
+	return nullptr;
 }
 
-IMAGE_SECTION_HEADER* ArtefactScanner::findSectionsHdr(MemPageData &memPage)
+IMAGE_SECTION_HEADER* ArtefactScanner::findSectionsHdr(MemPageData &memPage, const size_t max_search_size, const size_t search_offset)
 {
-	BYTE *hdr_ptr = findSecByPatterns(memPage);
-	if (!hdr_ptr) {
+	BYTE *search_ptr = search_offset + memPage.getLoadedData();
+	if (!peconv::validate_ptr(memPage.getLoadedData(), memPage.getLoadedSize(), search_ptr, max_search_size)) {
 		return nullptr;
 	}
-	DWORD charact = IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
-	if (!is_valid_section(memPage.getLoadedData(), memPage.getLoadedSize(), hdr_ptr, charact)) {
+	BYTE *hdr_ptr = findSecByPatterns(search_ptr, max_search_size);
+	if (!hdr_ptr) {
 		return nullptr;
 	}
 	// is it really the first section?
@@ -249,7 +257,7 @@ IMAGE_DOS_HEADER* ArtefactScanner::findMzPeHeader(MemPageData &memPage)
 		}
 		BYTE *dos_hdr = peconv::get_nt_hrds(buffer_ptr + i, scan_size - i);
 		if (dos_hdr != nullptr) {
-			return (IMAGE_DOS_HEADER*) dos_hdr;
+			return (IMAGE_DOS_HEADER*)(buffer_ptr + i);
 		}
 	}
 	return nullptr;
@@ -266,7 +274,7 @@ bool ArtefactScanner::findMzPe(ArtefactScanner::ArtefactsMapping &aMap)
 	if (!peconv::validate_ptr(loadedData, loadedSize, dos_hdr, sizeof(IMAGE_DOS_HEADER))) {
 		return false;
 	}
-	aMap.pe_image_base = memPage.region_start + ((ULONGLONG)dos_hdr - (ULONGLONG)loadedData);
+	aMap.pe_image_base = aMap.memPage.region_start + ((ULONGLONG)dos_hdr - (ULONGLONG)loadedData);
 
 	if (setMzPe(aMap, dos_hdr)) {
 		aMap.isMzPeFound = true;
@@ -352,8 +360,8 @@ bool ArtefactScanner::setNtFileHdr(ArtefactScanner::ArtefactsMapping &aMap, IMAG
 	if (sec_hdr_offset != found_offset) {
 		aMap.nt_file_hdr = nullptr;
 		//it has sections headers detected, but not validly aligned:
-		std::cout << "[WARNING] Sections header misaligned with FileHeader."
-			<< "Expected offset" << std::hex << sec_hdr_offset << " vs real offset" << found_offset << std::endl;
+		std::cout << "[WARNING] Sections header misaligned with FileHeader. "
+			<< "Expected offset: " << std::hex << sec_hdr_offset << " vs found offset: " << found_offset << std::endl;
 		return false;
 	}
 	//validation passed:
@@ -387,6 +395,10 @@ PeArtefacts* ArtefactScanner::generateArtefacts(ArtefactScanner::ArtefactsMappin
 	}
 	peArt->peBaseOffset = size_t(aMap.pe_image_base - memPage.region_start);
 	peArt->calculatedImgSize = calcImageSize(memPage, aMap.sec_hdr, aMap.pe_image_base);
+
+	if (aMap.nt_file_hdr) {
+		peArt->isDll = ((aMap.nt_file_hdr->Characteristics & IMAGE_FILE_DLL) != 0);
+	}
 	return peArt;
 }
 
@@ -395,8 +407,15 @@ PeArtefacts* ArtefactScanner::findArtefacts(MemPageData &memPage)
 	ArtefactsMapping aMap(memPage);
 	findMzPe(aMap);
 
-	//first try to find section headers:
-	IMAGE_SECTION_HEADER *sec_hdr = findSectionsHdr(memPage);
+	size_t max_section_search = memPage.getLoadedSize();
+	size_t min_offset = 0;
+	if (aMap.nt_file_hdr) {
+		min_offset = (BYTE*)aMap.nt_file_hdr - memPage.getLoadedData();
+		//don't search in full module, only in the first mem page:
+		max_section_search = PAGE_SIZE < memPage.getLoadedSize() ? PAGE_SIZE : memPage.getLoadedSize();
+	}
+
+	IMAGE_SECTION_HEADER *sec_hdr = findSectionsHdr(memPage, max_section_search, min_offset);
 	if (sec_hdr) {
 		setSecHdr(aMap, sec_hdr);
 	}
@@ -435,6 +454,21 @@ PeArtefacts* ArtefactScanner::findInPrevPages(ULONGLONG addr_start, ULONGLONG ad
 	return peArt;
 }
 
+bool ArtefactScanner::hasShellcode(HMODULE region_start, size_t region_size, PeArtefacts &peArt)
+{
+	bool is_shellcode = false;
+	if (peArt.peBaseOffset > 0) {
+		// the total region is bigger than the PE
+		is_shellcode = true;
+	}
+	size_t pe_region_size = peArt.calculatedImgSize + peArt.peBaseOffset;
+	if (region_size > peArt.calculatedImgSize) {
+		// the total region is bigger than the PE
+		is_shellcode = true;
+	}
+	return is_shellcode;
+}
+
 ArtefactScanReport* ArtefactScanner::scanRemote()
 {
 	deletePrevPage();
@@ -442,13 +476,13 @@ ArtefactScanReport* ArtefactScanner::scanRemote()
 	bool is_damaged_pe = false;
 	// it may still contain a damaged PE header...
 	ULONGLONG region_start = memPage.region_start;
-	MemPageData *artPagePtr = &memPage;
+	this->artPagePtr = &memPage;
 
 	PeArtefacts *peArt = findArtefacts(memPage);
 	if (!peArt  && (region_start > memPage.alloc_base)) {
 		peArt = findInPrevPages(memPage.alloc_base, memPage.region_start);
 		if (prevMemPage) {
-			artPagePtr = prevMemPage;
+			this->artPagePtr = prevMemPage;
 			region_start = prevMemPage->region_start;
 		}
 	}
@@ -459,9 +493,8 @@ ArtefactScanReport* ArtefactScanner::scanRemote()
 	const size_t region_size = size_t(memPage.region_end - region_start);
 
 	ArtefactScanReport *my_report = new ArtefactScanReport(processHandle, (HMODULE)region_start, region_size, SCAN_SUSPICIOUS, *peArt);
-	my_report->is_manually_loaded = !memPage.is_listed_module;
 	my_report->protection = memPage.protection;
-
+	my_report->has_shellcode = hasShellcode((HMODULE)region_start, region_size, *peArt);
 	delete peArt;
 	return my_report;
 }

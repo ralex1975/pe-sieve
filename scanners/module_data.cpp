@@ -106,7 +106,11 @@ std::string RemoteModuleData::getModuleName(HANDLE processHandle, HMODULE modBas
 		return "";
 	}
 	std::string basic_filename = convert_to_win32_path(filename);
-	return expand_path(basic_filename);
+	std::string expanded = expand_path(basic_filename);
+	if (expanded.length() == 0) {
+		return filename;
+	}
+	return expanded;
 }
 
 std::string RemoteModuleData::getMappedName(HANDLE processHandle, LPVOID modBaseAddr)
@@ -116,7 +120,11 @@ std::string RemoteModuleData::getMappedName(HANDLE processHandle, LPVOID modBase
 		return "";
 	}
 	std::string basic_filename = device_path_to_win32_path(filename);
-	return expand_path(basic_filename);
+	std::string expanded = expand_path(basic_filename);
+	if (expanded.length() == 0) {
+		return filename;
+	}
+	return expanded;
 }
 
 bool RemoteModuleData::init()
@@ -181,9 +189,11 @@ bool RemoteModuleData::isSectionExecutable(size_t section_number)
 		is_any_exec = (initial_protect & PAGE_EXECUTE_READWRITE)
 			|| (initial_protect & PAGE_EXECUTE_READ)
 			|| (initial_protect & PAGE_EXECUTE)
+			|| (initial_protect & PAGE_EXECUTE_WRITECOPY)
 			|| (protection & PAGE_EXECUTE_READWRITE)
 			|| (protection & PAGE_EXECUTE_READ)
-			|| (initial_protect & PAGE_EXECUTE);
+			|| (protection & PAGE_EXECUTE)
+			|| (protection & PAGE_EXECUTE_WRITECOPY);
 	}
 	return is_any_exec;
 }

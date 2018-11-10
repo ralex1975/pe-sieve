@@ -9,9 +9,9 @@
 
 class PeReconstructor {
 public:
-	PeReconstructor(PeArtefacts _artefacts)
+	PeReconstructor(PeArtefacts _artefacts, peconv::t_pe_dump_mode &dump_mode)
 		: artefacts(_artefacts),
-		vBuf(nullptr), vBufSize(0), unmap(true)
+		vBuf(nullptr), vBufSize(0), moduleBase(0), dumpMode(dump_mode)
 	{
 	}
 
@@ -21,13 +21,14 @@ public:
 
 	bool reconstruct(HANDLE processHandle);
 
-	bool dumpToFile(std::string dumpFileName, IN OPTIONAL peconv::ExportsMapper* exportsMap = nullptr);
+	bool dumpToFile(_In_ std::string dumpFileName, _In_opt_ peconv::ExportsMapper* exportsMap = nullptr);
 
 protected:
 	void freeBuffer() {
 		peconv::free_aligned(vBuf);
 		vBuf = nullptr;
 		vBufSize = 0;
+		moduleBase = 0;
 	}
 
 	bool reconstructPeHdr();
@@ -36,6 +37,7 @@ protected:
 	PeArtefacts artefacts;
 	BYTE *vBuf;
 	size_t vBufSize;
+	ULONGLONG moduleBase;
 
-	bool unmap;
+	peconv::t_pe_dump_mode &dumpMode;
 };

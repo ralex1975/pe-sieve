@@ -15,6 +15,8 @@ bool is_valid_section(BYTE *loadedData, size_t loadedSize, BYTE *hdr_ptr, DWORD 
 
 class PeArtefacts {
 public:
+	static const size_t JSON_LEVEL = 1;
+
 	PeArtefacts() {
 		regionStart = INVALID_OFFSET;
 		peBaseOffset = INVALID_OFFSET;
@@ -23,6 +25,7 @@ public:
 		secCount = 0;
 		calculatedImgSize = 0;
 		isMzPeFound = false;
+		isDll = true;
 	}
 
 	bool hasNtHdrs()
@@ -40,30 +43,33 @@ public:
 		return this->peBaseOffset + this->regionStart;
 	}
 
-	const virtual bool fieldsToJSON(std::stringstream &outs)
+	const virtual bool fieldsToJSON(std::stringstream &outs, size_t level = JSON_LEVEL)
 	{
-		outs << "\"pe_base_offset\" : ";
+		OUT_PADDED(outs, level, "\"pe_base_offset\" : ");
 		outs << "\"" << std::hex << peBaseOffset << "\"";
 		if (hasNtHdrs()) {
 			outs << ",\n";
-			outs << "\"nt_file_hdr\" : ";
+			OUT_PADDED(outs, level, "\"nt_file_hdr\" : ");
 			outs << "\"" << std::hex << ntFileHdrsOffset << "\"";
 		}
 		outs << ",\n";
-		outs << "\"sections_hdrs\" : ";
+		OUT_PADDED(outs, level, "\"sections_hdrs\" : ");
 		outs << "\"" << std::hex << secHdrsOffset << "\"";
 		outs << ",\n";
-		outs << "\"sections_count\" : ";
-		outs << std::hex << secCount;
+		OUT_PADDED(outs, level, "\"sections_count\" : ");
+		outs << std::dec << secCount;
+		outs << ",\n";
+		OUT_PADDED(outs, level, "\"is_dll\" : ");
+		outs << std::dec << isDll;
 		return true;
 	}
 	
-	const virtual bool toJSON(std::stringstream &outs)
+	const virtual bool toJSON(std::stringstream &outs, size_t level = JSON_LEVEL)
 	{
-		outs << "\"artefacts\" : ";
-		outs << "{\n";
-		fieldsToJSON(outs);
-		outs << "\n}";
+		OUT_PADDED(outs, level, "\"pe_artefacts\" : {\n");
+		fieldsToJSON(outs, level + 1);
+		outs << "\n";
+		OUT_PADDED(outs, level, "}");
 		return true;
 	}
 
@@ -74,6 +80,7 @@ public:
 	size_t secCount;
 	size_t calculatedImgSize;
 	bool isMzPeFound;
+	bool isDll;
 };
 
 class ArtefactScanReport : public MemPageScanReport
@@ -85,9 +92,9 @@ public:
 		initialRegionSize(_moduleSize)
 	{
 		is_executable = true;
-		is_manually_loaded = true;
 		protection = 0;
-		is_shellcode = isShellcode(peArt);
+		has_pe = true;
+		has_shellcode = false;
 
 		size_t total_region_size = peArt.calculatedImgSize + peArt.peBaseOffset;
 		if (total_region_size > this->moduleSize) {
@@ -95,43 +102,32 @@ public:
 		}
 	}
 
-	const virtual bool toJSON(std::stringstream &outs)
+	const virtual void fieldsToJSON(std::stringstream &outs, size_t level = JSON_LEVEL)
 	{
-		outs << "\"artefacts_scan\" : ";
-		outs << "{\n";
-		MemPageScanReport::fieldsToJSON(outs);
+		MemPageScanReport::fieldsToJSON(outs, level);
 		outs << ",\n";
-		artefacts.toJSON(outs);
-		outs << "\n}";
+		artefacts.toJSON(outs, level);
+	}
+
+	const virtual bool toJSON(std::stringstream &outs, size_t level = JSON_LEVEL)
+	{
+		OUT_PADDED(outs, level, "\"workingset_scan\" : {\n");
+		fieldsToJSON(outs, level + 1);
+		outs << "\n";
+		OUT_PADDED(outs, level, "}");
 		return true;
 	}
 
 	PeArtefacts artefacts;
 	size_t initialRegionSize;
-
-protected:
-	bool isShellcode(PeArtefacts &peArt)
-	{
-		bool is_shellcode = false;
-		if (peArt.peBaseOffset > 0) {
-			// the total region is bigger than the PE
-			is_shellcode = true;
-		}
-		size_t pe_region_size = peArt.calculatedImgSize + peArt.peBaseOffset;
-		if (pe_region_size < this->initialRegionSize) {
-			// the total region is bigger than the PE
-			is_shellcode = true;
-		}
-		return is_shellcode;
-	}
 };
 
 class ArtefactScanner {
 public:
 	ArtefactScanner(HANDLE _procHndl, MemPageData &_memPageData)
-		: processHandle(_procHndl), memPage(_memPageData)
+		: processHandle(_procHndl), 
+		memPage(_memPageData), prevMemPage(nullptr), artPagePtr(nullptr)
 	{
-		prevMemPage = nullptr;
 	}
 
 	virtual ~ArtefactScanner()
@@ -171,12 +167,12 @@ protected:
 
 	void deletePrevPage()
 	{
-		if (this->prevMemPage) {
-			delete this->prevMemPage;
-		}
+		delete this->prevMemPage;
 		this->prevMemPage = nullptr;
+		this->artPagePtr = nullptr;
 	}
 
+	bool hasShellcode(HMODULE region_start, size_t region_size, PeArtefacts &peArt);
 
 	bool findMzPe(ArtefactsMapping &mapping);
 	bool setMzPe(ArtefactsMapping &mapping, IMAGE_DOS_HEADER* _dos_hdr);
@@ -191,11 +187,12 @@ protected:
 	size_t calcImageSize(MemPageData &memPage, IMAGE_SECTION_HEADER *hdr_ptr, ULONGLONG pe_image_base);
 
 	IMAGE_FILE_HEADER* findNtFileHdr(BYTE* loadedData, size_t loadedSize);
-	BYTE* findSecByPatterns(MemPageData &memPage);
-	IMAGE_SECTION_HEADER* findSectionsHdr(MemPageData &memPageData);
+	BYTE* findSecByPatterns(BYTE *search_ptr, const size_t max_search_size);
+	IMAGE_SECTION_HEADER* findSectionsHdr(MemPageData &memPageData, const size_t max_search_size, const size_t search_offset);
 	IMAGE_DOS_HEADER* findMzPeHeader(MemPageData &memPage);
 
 	HANDLE processHandle;
 	MemPageData &memPage;
 	MemPageData *prevMemPage;
+	MemPageData *artPagePtr; //pointer to the page where the artefacts were found: either to memPage or to prevMemPage
 };

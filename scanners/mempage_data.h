@@ -25,7 +25,7 @@ public:
 	size_t getLoadedSize() { return loadedSize; }
 	const PBYTE getLoadedData() { return loadedData;  }
 
-	ULONGLONG start_va;
+	ULONGLONG start_va; // VA that was requested. May not be beginning of the region.
 	DWORD protection;
 	DWORD initial_protect;
 	bool is_private;
@@ -51,6 +51,7 @@ public:
 		return true;
 	}
 
+	bool hasMappedName();
 	// checks if the memory area is mapped 1-to-1 from the file on the disk
 	bool isRealMapping();
 

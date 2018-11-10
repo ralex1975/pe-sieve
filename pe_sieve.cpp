@@ -1,4 +1,4 @@
-// Scans for modified modules within the process of a given PID
+// Scans the process with a given PID
 // author: hasherezade (hasherezade@gmail.com)
 
 #include "pe_sieve.h"
@@ -14,7 +14,7 @@
 HANDLE open_process(DWORD processID)
 {
 	HANDLE hProcess = OpenProcess(
-		PROCESS_QUERY_INFORMATION |PROCESS_VM_READ,
+		PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
 		FALSE, processID
 	);
 	if (hProcess != nullptr) {
@@ -57,7 +57,32 @@ bool is_scaner_compatibile(HANDLE hProcess)
 	return true;
 }
 
-ProcessScanReport* check_modules_in_process(const t_params args)
+size_t dump_output(ProcessScanReport *process_report, HANDLE hProcess, const t_params args)
+{
+	if (!process_report || !hProcess) return 0;
+	if (args.out_filter == OUT_NO_DIR) {
+		return 0;
+	}
+	ResultsDumper dumper("", args.quiet);
+
+	if (dumper.dumpJsonReport(*process_report, REPORT_SUSPICIOUS_AND_ERRORS)) {
+		std::cout << "[+] Report dumped to: " << dumper.dumpDir << std::endl;
+	}
+	size_t dumped_modules = 0;
+	if (args.out_filter != OUT_NO_DUMPS) {
+		peconv::t_pe_dump_mode dump_mode = peconv::PE_DUMP_AUTO;
+		if (args.dump_mode < peconv::PE_DUMP_MODES_COUNT) {
+			dump_mode = peconv::t_pe_dump_mode(args.dump_mode);
+		}
+		dumped_modules = dumper.dumpAllModified(hProcess, *process_report, dump_mode);
+		if (dumped_modules) {
+			std::cout << "[+] Dumped modified to: " << dumper.dumpDir << std::endl;
+		}
+	}
+	return dumped_modules;
+}
+
+ProcessScanReport* scan_process(const t_params args)
 {
 	HANDLE hProcess = nullptr;
 	ProcessScanReport *process_report = nullptr;
@@ -75,18 +100,7 @@ ProcessScanReport* check_modules_in_process(const t_params args)
 		return nullptr;
 		
 	}
-
-	if (process_report != nullptr && !(args.out_filter & OUT_NO_DIR)) {
-		ResultsDumper dumper;
-		if (!(args.out_filter & OUT_NO_DUMPS)) {
-			if (dumper.dumpAllModified(hProcess, *process_report) > 0) {
-				std::cout << "[+] Dumped modified to: " << dumper.dumpDir << std::endl;
-			}
-		}
-		if (dumper.dumpJsonReport(*process_report, REPORT_SUSPICIOUS_AND_ERRORS)) {
-			std::cout << "[+] Report dumped to: " << dumper.dumpDir << std::endl;
-		}
-	}
+	dump_output(process_report, hProcess, args);
 	CloseHandle(hProcess);
 	return process_report;
 }
@@ -101,7 +115,7 @@ std::string info()
 	stream << " (x86)" << "\n\n";
 #endif
 	stream << "~ from hasherezade with love ~\n";
-	stream << "Detects inline hooks and other in-memory PE modifications\n";
+	stream << "Scans a given process, recognizes and dumps a variety of in-memory implants:\nreplaced/injected PEs, shellcodes, inline hooks, patches etc.\n";
 	stream << "URL: " << PESIEVE_URL << "\n";
 	return stream.str();
 }

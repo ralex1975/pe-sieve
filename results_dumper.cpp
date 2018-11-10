@@ -39,6 +39,28 @@ std::string ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, std::string
 	return stream.str();
 }
 
+std::string ResultsDumper::makeOutPath(std::string fname, std::string default_extension)
+{
+	//just in case if the directory creation failed:
+	if (!make_dump_dir(this->dumpDir)) {
+		this->dumpDir = ""; // reset path
+	}
+	std::stringstream stream;
+	if (this->dumpDir.length() > 0) {
+		stream << this->dumpDir;
+		stream << "\\";
+	}
+	
+	if (fname.length() > 0) {
+		stream << fname;
+	}
+	else {
+		stream << std::dec << time(nullptr);
+		stream << default_extension;
+	}
+	return stream.str();
+}
+
 bool dumpAsShellcode(std::string dumpFileName, HANDLE processHandle, PBYTE moduleBase, size_t moduleSize)
 {
 	if (!moduleSize) {
@@ -59,14 +81,38 @@ bool dumpAsShellcode(std::string dumpFileName, HANDLE processHandle, PBYTE modul
 	return is_ok;
 }
 
-size_t ResultsDumper::dumpAllModified(HANDLE processHandle, ProcessScanReport &process_report)
+std::string get_payload_ext(ModuleScanReport* mod)
+{
+	ArtefactScanReport* artefactRepot = dynamic_cast<ArtefactScanReport*>(mod);
+	if (!artefactRepot) {
+		return ".dll"; //default
+	}
+	if (artefactRepot->artefacts.isDll) {
+		return ".dll";
+	}
+	return ".exe";
+}
+
+std::string get_dump_mode_name(peconv::t_pe_dump_mode dump_mode)
+{
+	switch (dump_mode) {
+	case peconv::PE_DUMP_VIRTUAL:
+		return "Virtual";
+	case peconv::PE_DUMP_UNMAP:
+		return "Unmapped";
+	case peconv::PE_DUMP_REALIGN:
+		return "Realigned";
+	}
+	return "";
+}
+
+size_t ResultsDumper::dumpAllModified(HANDLE processHandle, ProcessScanReport &process_report, const peconv::t_pe_dump_mode dump_mode)
 {
 	if (processHandle == nullptr) {
 		return 0;
 	}
 
-	DWORD pid = GetProcessId(processHandle);
-	this->dumpDir = ResultsDumper::makeDirName(pid);
+	this->dumpDir = ResultsDumper::makeDirName(process_report.getPid());
 
 	char szModName[MAX_PATH] = { 0 };
 	size_t dumped = 0;
@@ -85,35 +131,41 @@ size_t ResultsDumper::dumpAllModified(HANDLE processHandle, ProcessScanReport &p
 		if (GetModuleFileNameExA(processHandle, mod->module, szModName, MAX_PATH)) {
 			modulePath = get_file_name(szModName);
 		}
+		const std::string payload_ext = get_payload_ext(mod);
+		std::string dumpFileName = makeModuleDumpPath((ULONGLONG)mod->module, modulePath, payload_ext);
+		peconv::t_pe_dump_mode curr_dump_mode = dump_mode;
 
-		std::string dumpFileName = makeModuleDumpPath((ULONGLONG)mod->module, modulePath, ".dll");
-
-		if (!peconv::dump_remote_pe(
+		bool is_module_dumped = peconv::dump_remote_pe(
 			dumpFileName.c_str(), //output file
-			processHandle, 
-			(PBYTE) mod->module, 
-			true, //unmap
-			process_report.exportsMap
-		))
+			processHandle,
+			(PBYTE)mod->module,
+			curr_dump_mode, //PE dump mode
+			process_report.exportsMap);
+		
+		if (!is_module_dumped)
 		{
-			std::string dumpFileName = makeModuleDumpPath((ULONGLONG)mod->module, modulePath, ".shc");
+			dumpFileName = makeModuleDumpPath((ULONGLONG)mod->module, modulePath, ".shc");
 
 			if (!dumpAsShellcode(dumpFileName, processHandle, (PBYTE)mod->module, mod->moduleSize)) {
-				std::cerr << "Failed dumping module!" << std::endl;
+				std::cerr << "[-] Failed dumping module!" << std::endl;
 			}
-			ArtefactScanReport* artefactRepot = dynamic_cast<ArtefactScanReport*>(mod);
-			if (artefactRepot) {
-				ULONGLONG found_pe_base = artefactRepot->artefacts.peImageBase();
-				PeReconstructor peRec(artefactRepot->artefacts);
+			ArtefactScanReport* artefactReport = dynamic_cast<ArtefactScanReport*>(mod);
+			if (artefactReport) {
+				ULONGLONG found_pe_base = artefactReport->artefacts.peImageBase();
+				PeReconstructor peRec(artefactReport->artefacts, curr_dump_mode);
 				if (peRec.reconstruct(processHandle)) {
-					std::string dumpFileName = makeModuleDumpPath(found_pe_base, modulePath, ".rec.dll");
-					peRec.dumpToFile(dumpFileName, process_report.exportsMap);
+					dumpFileName = makeModuleDumpPath(found_pe_base, modulePath, ".rec" + payload_ext);
+					is_module_dumped = peRec.dumpToFile(dumpFileName, process_report.exportsMap);
 				}
 			}
-			continue;
 		}
-		dumped++;
-		mod->generateTags(dumpFileName + ".tag");
+		if (is_module_dumped) {
+			dumped++;
+			mod->generateTags(dumpFileName + ".tag");
+			if (!this->quiet) {
+				std::cout << "[*] Dumped module to: " + dumpFileName + " as " + get_dump_mode_name(curr_dump_mode) << "\n";
+			}
+		}
 	}
 	return dumped;
 }
@@ -142,12 +194,12 @@ bool ResultsDumper::dumpJsonReport(ProcessScanReport &process_report, t_report_f
 		return false; 
 	}
 
-	//just in case if the directory was not created before:
-	if (!make_dump_dir(this->dumpDir)) {
-		this->dumpDir = ""; // reset path
-	}
+	//ensure that the directory is created:
+	this->dumpDir = ResultsDumper::makeDirName(process_report.getPid());
+
 	std::ofstream json_report;
-	json_report.open(dumpDir + "\\report.json");
+	std::string report_path = makeOutPath("report.json");
+	json_report.open(report_path);
 	if (json_report.is_open() == false) {
 		return false;
 	}

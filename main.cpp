@@ -13,7 +13,9 @@
 
 #include "peconv.h"
 #include "pe_sieve.h"
+#include "color_scheme.h"
 
+#define PARAM_SWITCH '/'
 //scan options:
 #define PARAM_PID "/pid"
 #define PARAM_SHELLCODE "/shellc"
@@ -25,6 +27,7 @@
 #define PARAM_OUT_FILTER "/ofilter"
 #define PARAM_QUIET "/quiet"
 #define PARAM_JSON "/json"
+#define PARAM_DIR "/dir"
 //info:
 #define PARAM_HELP "/help"
 #define PARAM_HELP2  "/?"
@@ -50,9 +53,9 @@ peconv::t_pe_dump_mode normalize_dump_mode(size_t mode_id)
 
 void print_help()
 {
-	const int hdr_color = 14;
-	const int param_color = 15;
-	const int separator_color = 6;
+	const int hdr_color = HEADER_COLOR;
+	const int param_color = HILIGHTED_COLOR;
+	const int separator_color = SEPARATOR_COLOR;
 	print_in_color(hdr_color, "Required: \n");
 	print_in_color(param_color, PARAM_PID);
 	std::cout << " <target_pid>\n\t: Set the PID of the target process.\n";
@@ -96,7 +99,9 @@ void print_help()
 	std::cout << "\t: Print only the summary. Do not log on stdout during the scan.\n";
 	print_in_color(param_color, PARAM_JSON);
 	std::cout << "\t: Print the JSON report as the summary.\n";
-
+	
+	print_in_color(param_color, PARAM_DIR);
+	std::cout << " <output_dir>\n\t: Set output directory (default: current directory).\n";
 	print_in_color(hdr_color, "\nInfo: \n");
 	print_in_color(param_color, PARAM_HELP);
 	std::cout << "    : Print this help.\n";
@@ -142,6 +147,27 @@ void print_report(const ProcessScanReport& report, const t_params args)
 	if (!args.json_output) {
 		std::cout << "---" << std::endl;
 	}
+}
+
+bool set_output_dir(t_params &args, const char *new_dir)
+{
+	if (!new_dir) return false;
+
+	size_t new_len = strlen(new_dir);
+	size_t buffer_len = sizeof(args.output_dir);
+	if (new_len > buffer_len) return false;
+
+	memset(args.output_dir, 0, buffer_len);
+	memcpy(args.output_dir, new_dir, new_len);
+	return true;
+}
+
+void print_unknown_param(const char *param)
+{
+	print_in_color(WARNING_COLOR, "Invalid parameter: ");
+	std::cout << param << "\n";
+	print_in_color(HILIGHTED_COLOR, "Available parameters:\n\n");
+	print_help();
 }
 
 int main(int argc, char *argv[])
@@ -196,6 +222,15 @@ int main(int argc, char *argv[])
 		else if (!strcmp(argv[i], PARAM_DUMP_MODE) && (i + 1) < argc) {
 			args.dump_mode = normalize_dump_mode(atoi(argv[i + 1]));
 			++i;
+		} else if (!strcmp(argv[i], PARAM_DIR) && (i + 1) < argc) {
+			set_output_dir(args, argv[i + 1]);
+			++i;
+		} else if (strlen(argv[i]) > 0 
+			&& (i > 1 || argv[i][0] == PARAM_SWITCH) //allow for the PID as the first argument
+			)
+		{
+			print_unknown_param(argv[i]);
+			return 0;
 		}
 	}
 	//if didn't received PID by explicit parameter, try to parse the first param of the app

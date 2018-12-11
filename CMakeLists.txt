@@ -17,9 +17,9 @@ include_directories ( ${PECONV_DIR}/include )
 
 set (scanners_srcs
 	scanners/mapping_scanner.cpp
-	scanners/hollowing_scanner.cpp
-	scanners/hook_scanner.cpp
-	scanners/mempage_scanner.cpp
+	scanners/headers_scanner.cpp
+	scanners/code_scanner.cpp
+	scanners/workingset_scanner.cpp
 	scanners/artefact_scanner.cpp
 	scanners/scanner.cpp
 	scanners/module_data.cpp
@@ -32,10 +32,10 @@ set (scanners_srcs
 
 set (scanners_hdrs
 	scanners/mapping_scanner.h
-	scanners/hollowing_scanner.h
-	scanners/hook_scanner.h
+	scanners/headers_scanner.h
+	scanners/code_scanner.h
 	scanners/module_scanner.h
-	scanners/mempage_scanner.h
+	scanners/workingset_scanner.h
 	scanners/artefact_scanner.h
 	scanners/scanner.h
 	scanners/module_scan_report.h
@@ -46,6 +46,18 @@ set (scanners_hdrs
 	scanners/patch_list.h
 	scanners/patch_analyzer.h
 	scanners/scanned_modules.h
+)
+
+set (postprocessors_hdrs
+	postprocessors/report_formatter.h
+	postprocessors/results_dumper.h
+	postprocessors/pe_reconstructor.h
+)
+
+set (postprocessors_srcs
+	postprocessors/report_formatter.cpp
+	postprocessors/results_dumper.cpp
+	postprocessors/pe_reconstructor.cpp
 )
 
 set (utils_srcs
@@ -69,21 +81,18 @@ set (utils_hdrs
 set (srcs
 	pe_sieve.cpp
 	pe_sieve_params_info.cpp
-	report_formatter.cpp
-	results_dumper.cpp
-	pe_reconstructor.cpp
+	color_scheme.h
 	${scanners_srcs}
+	${postprocessors_srcs}
 	${utils_srcs}
 )
 
 set (hdrs
 	pe_sieve.h
 	pe_sieve_params_info.h
-	report_formatter.h
-	results_dumper.h
-	pe_reconstructor.h
 	include/pe_sieve_types.h
 	${scanners_hdrs}
+	${postprocessors_hdrs}
 	${utils_hdrs}
 )
 
@@ -92,11 +101,16 @@ set (rsrc
 	resources.rc
 )
 
+# set filters in Visual Studio project:
+
 SOURCE_GROUP("Source Files\\scanners" FILES ${scanners_srcs} )
 SOURCE_GROUP("Header Files\\scanners" FILES ${scanners_hdrs} )
 
 SOURCE_GROUP("Source Files\\utils" FILES ${utils_srcs} )
 SOURCE_GROUP("Header Files\\utils" FILES ${utils_hdrs} )
+
+SOURCE_GROUP("Source Files\\postprocessors" FILES ${postprocessors_srcs} )
+SOURCE_GROUP("Header Files\\postprocessors" FILES ${postprocessors_hdrs} )
 
 # libs
 add_subdirectory (libpeconv/libpeconv)

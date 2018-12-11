@@ -3,14 +3,18 @@
 #include <Psapi.h>
 
 #include <fstream>
-
-#include "utils\util.h"
-#include "utils\workingset_enum.h"
+#include "../utils/util.h"
+#include "../utils/workingset_enum.h"
 #include "pe_reconstructor.h"
+
+#define DIR_SEPARATOR "\\"
 //---
 
 bool ResultsDumper::make_dump_dir(const std::string directory)
 {
+	if (directory.length() == 0) {
+		return true;
+	}
 	if (CreateDirectoryA(directory.c_str(), NULL) 
 		||  GetLastError() == ERROR_ALREADY_EXISTS)
 	{
@@ -19,16 +23,33 @@ bool ResultsDumper::make_dump_dir(const std::string directory)
 	return false;
 }
 
-std::string ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, std::string fname, std::string default_extension)
+void ResultsDumper::makeAndJoinDirectories(std::stringstream& stream)
 {
-	if (!make_dump_dir(this->dumpDir)) {
+	bool is_created = true;
+	if (!make_dump_dir(this->baseDir)) {
+		this->baseDir = ""; // reset path
+	}
+	std::string inner_dir = this->dumpDir;
+	if (baseDir.length() > 0) {
+		inner_dir = this->baseDir + DIR_SEPARATOR + this->dumpDir;
+	}
+	if (!make_dump_dir(inner_dir)) {
 		this->dumpDir = ""; // reset path
 	}
-	std::stringstream stream;
+	if (baseDir.length() > 0) {
+		stream << baseDir;
+		stream << DIR_SEPARATOR;
+	}
 	if (this->dumpDir.length() > 0) {
 		stream << this->dumpDir;
-		stream << "\\";
+		stream << DIR_SEPARATOR;
 	}
+}
+
+std::string ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, std::string fname, std::string default_extension)
+{
+	std::stringstream stream;
+	makeAndJoinDirectories(stream);
 	stream << std::hex << modBaseAddr;
 	if (fname.length() > 0) {
 		stream << ".";
@@ -41,16 +62,9 @@ std::string ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, std::string
 
 std::string ResultsDumper::makeOutPath(std::string fname, std::string default_extension)
 {
-	//just in case if the directory creation failed:
-	if (!make_dump_dir(this->dumpDir)) {
-		this->dumpDir = ""; // reset path
-	}
 	std::stringstream stream;
-	if (this->dumpDir.length() > 0) {
-		stream << this->dumpDir;
-		stream << "\\";
-	}
-	
+	makeAndJoinDirectories(stream);
+
 	if (fname.length() > 0) {
 		stream << fname;
 	}
@@ -214,10 +228,6 @@ bool ResultsDumper::dumpJsonReport(ProcessScanReport &process_report, t_report_f
 std::string ResultsDumper::makeDirName(const DWORD process_id)
 {
 	std::stringstream stream;
-	if (baseDir.length() > 0) {
-		stream << baseDir;
-		stream << "\\";
-	}
 	stream << "process_";
 	stream << process_id;
 	return stream.str();

@@ -12,9 +12,6 @@ public:
 	ResultsDumper(std::string _baseDir, bool _quiet)
 		: baseDir(_baseDir), quiet(_quiet)
 	{
-		if (!make_dump_dir(this->baseDir)) {
-			this->baseDir = ""; // reset path
-		}
 	}
 
 	size_t dumpAllModified(HANDLE hProcess, ProcessScanReport &process_report, const peconv::t_pe_dump_mode dump_mode);
@@ -34,4 +31,6 @@ protected:
 	std::string makeOutPath(std::string fname, std::string defaultExtension="");
 
 	std::string makeDirName(const DWORD process_id);
+
+	void makeAndJoinDirectories(std::stringstream& name_stream);
 };

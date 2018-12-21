@@ -12,6 +12,7 @@
 #include "code_scanner.h"
 #include "workingset_scanner.h"
 #include "mapping_scanner.h"
+#include "hook_targets_resolver.h"
 
 #include <string>
 #include <locale>
@@ -62,6 +63,14 @@ t_scan_status ProcessScanner::scanForHooks(ModuleData& modData, RemoteModuleData
 	return is_hooked;
 }
 
+bool ProcessScanner::resolveHooksTargets(ProcessScanReport& process_report)
+{
+	HookTargetResolver hookResolver(process_report, this->processHandle);
+	const std::set<ModuleScanReport*> &code_reports = process_report.reportsByType[ProcessScanReport::REPORT_CODE_SCAN];
+	size_t resolved_count = hookResolver.resolveAllHooks(code_reports);
+	return (resolved_count > 0);
+}
+
 ProcessScanReport* ProcessScanner::scanRemote()
 {
 	ProcessScanReport *pReport = new ProcessScanReport(this->args.pid);
@@ -101,6 +110,8 @@ ProcessScanReport* ProcessScanner::scanRemote()
 	if (!modulesScanned && !modulesScanned) {
 		throw std::runtime_error(errorsStr.str());
 	}
+	//post-process hooks
+	resolveHooksTargets(*pReport);
 	return pReport;
 }
 

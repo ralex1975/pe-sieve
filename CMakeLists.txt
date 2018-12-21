@@ -28,6 +28,7 @@ set (scanners_srcs
 	scanners/patch_analyzer.cpp
 	scanners/scan_report.cpp
 	scanners/scanned_modules.cpp
+	scanners/hook_targets_resolver.cpp
 )
 
 set (scanners_hdrs
@@ -46,6 +47,7 @@ set (scanners_hdrs
 	scanners/patch_list.h
 	scanners/patch_analyzer.h
 	scanners/scanned_modules.h
+	scanners/hook_targets_resolver.h
 )
 
 set (postprocessors_hdrs
@@ -132,3 +134,5 @@ target_link_libraries ( ${PROJECT_NAME} ${PECONV_LIB} "psapi.lib" "ntdll.lib")
 
 # dependencies
 add_dependencies(${PROJECT_NAME} libpeconv)
+
+INSTALL( TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_BINARY_DIR} COMPONENT ${PROJECT_NAME} )

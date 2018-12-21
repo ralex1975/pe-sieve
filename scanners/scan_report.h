@@ -71,6 +71,7 @@ public:
 	std::vector<ModuleScanReport*> module_reports; //TODO: make it protected
 	peconv::ExportsMapper *exportsMap;
 
+
 protected:
 	void deleteModuleReports()
 	{
@@ -91,7 +92,7 @@ protected:
 	size_t errorsCount;
 
 	ProcessModules modulesInfo;
-	std::set<ModuleScanReport*> reports_by_type[REPORT_TYPES_COUNT];
+	std::set<ModuleScanReport*> reportsByType[REPORT_TYPES_COUNT];
 
 	friend class ProcessScanner;
 };
